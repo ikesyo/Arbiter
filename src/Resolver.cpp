@@ -159,8 +159,20 @@ ArbiterSelectedVersionList ArbiterResolver::fetchAvailableVersions (const Arbite
   }
 }
 
-ArbiterResolvedDependencyList resolve () noexcept(false)
+ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 {
+  std::unordered_map<ArbiterDependency, std::vector<ArbiterSelectedVersion>> versionsByDependency;
+
+  for (const ArbiterDependency &dependency : _dependencyList._dependencies) {
+    auto versions = availableVersionsSatisfying(dependency._projectIdentifier, dependency.requirement());
+
+    // Sort the version list with highest precedence first, so we try the newest possible versions .
+    std::sort(versions.begin(), versions.end(), std::greater<ArbiterSelectedVersion>());
+
+    versionsByDependency[dependency] = std::move(versions);
+  }
+
+  // TODO
   assert(false);
 }
 

@@ -2,6 +2,7 @@
 
 #include "Exception.h"
 #include "Hash.h"
+#include "Iterator.h"
 #include "Optional.h"
 #include "Requirement.h"
 #include "ToString.h"
@@ -161,9 +162,7 @@ ArbiterSelectedVersionList ArbiterResolver::fetchAvailableVersions (const Arbite
 
 ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 {
-  // TODO: This should use an ordered map or a different structure, so that
-  // dependency resolution is deterministic.
-  std::unordered_map<ArbiterDependency, std::vector<ArbiterSelectedVersion>> versionsByDependency;
+  std::map<ArbiterDependency, std::vector<ArbiterSelectedVersion>> versionsByDependency;
   versionsByDependency.reserve(_dependencyList._dependencies.size());
 
   for (const ArbiterDependency &dependency : _dependencyList._dependencies) {

@@ -22,7 +22,7 @@ struct Base : std::runtime_error
     Base (const std::string &string)
       : std::runtime_error(string)
     {}
-}
+};
 
 /**
  * Exception type representing an error that was returned from Arbiter client

@@ -16,86 +16,104 @@
 using namespace Arbiter;
 using namespace Resolver;
 
-void DependencyGraph::addNode (Node node, const ArbiterRequirement &initialRequirement, const Optional<Node> &dependent) noexcept(false)
+void DependencyGraph::addNode (ArbiterResolvedDependency node, const ArbiterRequirement &initialRequirement, const Optional<ArbiterProjectIdentifier> &dependent) noexcept(false)
 {
   assert(initialRequirement.satisfiedBy(node._version._semanticVersion));
 
-  std::unique_ptr<ArbiterRequirement> requirementToInsert;
-  if (const std::shared_ptr<ArbiterRequirement> &existingRequirement = _requirementsByNode[node]) {
+  const NodeKey &key = node._project;
+
+  const auto it = _nodeMap.find(key);
+  if (it != _nodeMap.end()) {
+    NodeValue &value = it->second;
+
     // We need to unify our input with what was already there.
-    if (auto newRequirement = initialRequirement.intersect(*existingRequirement)) {
-      if (!newRequirement->satisfiedBy(node._version._semanticVersion)) {
-        throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(*newRequirement) + " with " + toString(node._version));
+    if (auto newRequirement = initialRequirement.intersect(value.requirement())) {
+      if (!newRequirement->satisfiedBy(value._version._semanticVersion)) {
+        throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(*newRequirement) + " with " + toString(value._version));
       }
 
-      requirementToInsert = std::move(newRequirement);
+      value.setRequirement(std::move(newRequirement));
     } else {
-      throw Exception::MutuallyExclusiveConstraints(toString(*existingRequirement) + " and " + toString(initialRequirement) + " are mutually exclusive");
+      throw Exception::MutuallyExclusiveConstraints(toString(value.requirement()) + " and " + toString(initialRequirement) + " are mutually exclusive");
     }
   } else {
-    requirementToInsert = initialRequirement.clone();
+    _nodeMap.emplace(std::make_pair(key, NodeValue(node._version, initialRequirement)));
   }
-
-  assert(requirementToInsert);
-  _requirementsByNode[node] = std::move(requirementToInsert);
 
   if (dependent) {
-    _edges[*dependent].insert(node);
+    _edges[*dependent].insert(key);
   } else {
-    _roots.insert(node);
+    _roots.insert(key);
   }
 }
 
-void DependencyGraph::concatGraph (const DependencyGraph &other, const Optional<Node> &dependent) noexcept(false)
+std::vector<ArbiterResolvedDependency> DependencyGraph::allNodes() const
 {
-  for (const auto &node : other.roots()) {
-    addNode(node, *other._requirementsByNode.at(node), dependent);
-  }
+  std::vector<ArbiterResolvedDependency> nodes;
+  nodes.reserve(_nodeMap.size());
 
-  for (const auto &pair : other.edges()) {
-    Optional<Node> node(pair.first);
-
-    for (const auto &dependency : pair.second) {
-      addNode(dependency, *other._requirementsByNode.at(dependency), node);
-    }
-  }
-}
-
-std::vector<DependencyGraph::Node> DependencyGraph::allNodes() const
-{
-  std::vector<Node> nodes;
-  nodes.reserve(_requirementsByNode.size());
-
-  for (const auto &pair : _requirementsByNode) {
-    nodes.emplace_back(pair.first);
+  for (const auto &pair : _nodeMap) {
+    nodes.emplace_back(resolveNode(pair.first, pair.second));
   }
 
   return nodes;
 }
 
-bool DependencyGraph::operator== (const DependencyGraph &other) const
+DependencyGraph::NodeValue::NodeValue (ArbiterSelectedVersion version, const ArbiterRequirement &requirement)
+  : _version(std::move(version))
 {
-  return _edges == other._edges && _roots == other._roots;
+  setRequirement(requirement);
 }
 
-std::ostream &operator<< (std::ostream &os, const DependencyGraph &graph)
+const ArbiterRequirement &DependencyGraph::NodeValue::requirement () const
+{
+  return *_requirement;
+}
+
+void DependencyGraph::NodeValue::setRequirement (const ArbiterRequirement &requirement)
+{
+  setRequirement(requirement.clone());
+}
+
+void DependencyGraph::NodeValue::setRequirement (std::unique_ptr<ArbiterRequirement> requirement)
+{
+  assert(requirement->satisfiedBy(_version._semanticVersion));
+  _requirement = std::move(requirement);
+}
+
+ArbiterResolvedDependency DependencyGraph::resolveNode (const NodeKey &key, const NodeValue &value)
+{
+  return ArbiterResolvedDependency(key, value._version);
+}
+
+ArbiterResolvedDependency DependencyGraph::resolveNode (const NodeKey &key) const
+{
+  return resolveNode(key, _nodeMap.at(key));
+}
+
+std::ostream &DependencyGraph::describe (std::ostream &os) const
 {
   os << "Roots:";
-  for (const DependencyGraph::Node &root : graph.roots()) {
-    os << "\n\t" << root;
+  for (const NodeKey &key : _roots) {
+    os << "\n\t" << resolveNode(key);
   }
 
   os << "\n\nEdges";
-  for (const auto &pair : graph.edges()) {
-    const DependencyGraph::Node &node = pair.first;
-    os << "\n\t" << node._project << " ->";
+  for (const auto &pair : _edges) {
+    const NodeKey &key = pair.first;
+    os << "\n\t" << key << " ->";
 
-    for (const DependencyGraph::Node &dependency : pair.second) {
-      os << "\n\t\t" << dependency;
+    for (const NodeKey &dependency : pair.second) {
+      os << "\n\t\t" << resolveNode(dependency);
     }
   }
 
   return os;
+}
+
+std::ostream &operator<< (std::ostream &os, const DependencyGraph &graph)
+{
+  return graph.describe(os);
 }
 
 ArbiterResolver *ArbiterCreateResolver (ArbiterResolverBehaviors behaviors, const ArbiterDependencyList *dependencyList, ArbiterUserValue context)

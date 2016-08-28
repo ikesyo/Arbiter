@@ -11,16 +11,6 @@ using namespace Resolver;
 
 namespace {
 
-ArbiterDependencyList *createEmptyDependencyList (const ArbiterResolver *, const ArbiterProjectIdentifier *, const ArbiterSelectedVersion *, char **)
-{
-  return new ArbiterDependencyList();
-}
-
-ArbiterSelectedVersionList *createEmptyAvailableVersionsList (const ArbiterResolver *, const ArbiterProjectIdentifier *, char **)
-{
-  return new ArbiterSelectedVersionList();
-}
-
 /**
  * A C++ object capable of being an ArbiterUserValue.
  */
@@ -98,6 +88,32 @@ SharedUserValue<Owner> makeSharedUserValue (Args &&...args)
   return SharedUserValue<Owner>(TestValue::convertToUserValue(std::make_unique<Value>(std::forward<Args>(args)...)));
 }
 
+ArbiterDependencyList *createEmptyDependencyList (const ArbiterResolver *, const ArbiterProjectIdentifier *, const ArbiterSelectedVersion *, char **)
+{
+  return new ArbiterDependencyList();
+}
+
+ArbiterSelectedVersionList *createEmptyAvailableVersionsList (const ArbiterResolver *, const ArbiterProjectIdentifier *, char **)
+{
+  return new ArbiterSelectedVersionList();
+}
+
+ArbiterSelectedVersionList *createMajorVersionsList (const ArbiterResolver *, const ArbiterProjectIdentifier *, char **)
+{
+  std::vector<ArbiterSelectedVersion> versions;
+  
+  versions.emplace_back(ArbiterSemanticVersion(2, 0, 0), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(3, 0, 0), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(1, 0, 0), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+
+  return new ArbiterSelectedVersionList(std::move(versions));
+}
+
+ArbiterProjectIdentifier emptyProjectIdentifier ()
+{
+  return ArbiterProjectIdentifier(makeSharedUserValue<ArbiterProjectIdentifier, EmptyTestValue>());
+}
+
 } // namespace
 
 TEST(ResolverTest, ResolvesEmptyDependencies) {
@@ -110,3 +126,40 @@ TEST(ResolverTest, ResolvesEmptyDependencies) {
   ArbiterResolvedDependencyList resolved = resolver.resolve();
   EXPECT_TRUE(resolved._dependencies.empty());
 }
+
+TEST(ResolverTest, ResolvesOneDependency) {
+  ArbiterResolverBehaviors behaviors;
+  behaviors.createDependencyList = &createEmptyDependencyList;
+  behaviors.createAvailableVersionsList = &createMajorVersionsList;
+
+  std::vector<ArbiterDependency> dependencies;
+  dependencies.emplace_back(emptyProjectIdentifier(), Requirement::AtLeast(ArbiterSemanticVersion(2, 0, 0)));
+
+  ArbiterResolver resolver(behaviors, ArbiterDependencyList(std::move(dependencies)), makeSharedUserValue<ArbiterResolver, EmptyTestValue>());
+
+  ArbiterResolvedDependencyList resolved = resolver.resolve();
+  EXPECT_FALSE(resolved._dependencies.empty());
+  EXPECT_EQ(resolved._dependencies[0]._project, emptyProjectIdentifier());
+  EXPECT_EQ(resolved._dependencies[0]._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
+}
+
+TEST(ResolverTest, ResolvesMultipleDependencies)
+{}
+
+TEST(ResolverTest, ResolvesTransitiveDependencies)
+{}
+
+TEST(ResolverTest, FailsWhenNoAvailableVersions)
+{}
+
+TEST(ResolverTest, FailsWhenNoSatisfyingVersions)
+{}
+
+TEST(ResolverTest, FailsWithMutuallyExclusiveRequirements)
+{}
+
+TEST(ResolverTest, RethrowsUserDependencyListErrors)
+{}
+
+TEST(ResolverTest, RethrowsUserVersionListErrors)
+{}

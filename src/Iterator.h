@@ -136,8 +136,8 @@ class PermutationIterator final : public std::iterator<std::forward_iterator_tag
     {
       _iterators.reserve(ranges.size());
 
-      for (const IteratorRange<It> &range : ranges) {
-        _iterators.emplace_back(range);
+      for (IteratorRange<It> &range : ranges) {
+        _iterators.emplace_back(std::move(range));
       }
     }
 

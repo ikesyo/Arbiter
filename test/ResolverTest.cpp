@@ -143,6 +143,7 @@ TEST(ResolverTest, ResolvesOneDependency) {
   EXPECT_EQ(resolved._dependencies[0]._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
 }
 
+#if 0
 TEST(ResolverTest, ResolvesMultipleDependencies)
 {}
 
@@ -163,3 +164,4 @@ TEST(ResolverTest, RethrowsUserDependencyListErrors)
 
 TEST(ResolverTest, RethrowsUserVersionListErrors)
 {}
+#endif

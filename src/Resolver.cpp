@@ -175,6 +175,11 @@ ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
     versionsByDependency[dependency] = std::move(versions);
   }
 
+  for (const auto &pair : versionsByDependency) {
+    const ArbiterDependency &dependency = pair.first;
+    const std::vector<ArbiterSelectedVersion> &versions = pair.second;
+  }
+
   /*
   DependencyGraph candidate;
 

@@ -186,6 +186,10 @@ ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 
 DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &baseGraph, const std::vector<ArbiterDependency> &dependencyList, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false)
 {
+  if (dependencyList.empty()) {
+    return baseGraph;
+  }
+
   std::map<ArbiterProjectIdentifier, std::unique_ptr<ArbiterRequirement>> requirementsByProject;
 
   for (const ArbiterDependency &dependency : dependencyList) {

@@ -11,7 +11,6 @@
 #include <cassert>
 #include <exception>
 #include <map>
-#include <iostream>
 #include <stdexcept>
 
 using namespace Arbiter;
@@ -218,7 +217,6 @@ DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &bas
     resolutions.reserve(versions.size());
 
     for (ArbiterSelectedVersion &version : versions) {
-      std::cout << project << version << std::endl;
       resolutions.emplace_back(project, std::move(version));
     }
 
@@ -234,15 +232,12 @@ DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &bas
     const std::vector<ArbiterResolvedDependency> &dependencies = pair.second;
     ranges.emplace_back(dependencies.cbegin(), dependencies.cend());
   }
-  std::cout << ranges.size() << std::endl;
 
   assert(ranges.size() == possibilities.size());
 
   std::exception_ptr lastException = std::make_exception_ptr(Exception::UnsatisfiableConstraints("No further combinations to attempt"));
 
   for (PermutationIterator<Iterator> permuter(std::move(ranges)); permuter; ++permuter) {
-    std::cout << "in loop" << std::endl;
-
     try {
       std::vector<ArbiterResolvedDependency> choices = *permuter;
 
@@ -276,7 +271,6 @@ DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &bas
 
       return resolveDependencies(candidate, std::move(collectedTransitives), std::move(dependentsByTransitive));
     } catch (Arbiter::Exception::Base &ex) {
-      std::cerr << ex << std::endl;
       lastException = std::current_exception();
     }
   }

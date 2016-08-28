@@ -200,7 +200,7 @@ class PermutationIterator final : public std::iterator<std::forward_iterator_tag
      */
     explicit operator bool () const
     {
-      return _iterators.empty() || !_iterators.at(0);
+      return !_iterators.empty() && _iterators.at(0);
     }
 
   private:

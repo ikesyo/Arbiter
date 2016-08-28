@@ -1,7 +1,7 @@
 #include "Resolver.h"
 
+#include "Algorithm.h"
 #include "Exception.h"
-#include "Hash.h"
 #include "Iterator.h"
 #include "Optional.h"
 #include "Requirement.h"
@@ -180,10 +180,15 @@ ArbiterSelectedVersionList ArbiterResolver::fetchAvailableVersions (const Arbite
 
 ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 {
-  // TODO: Refactor ArbiterResolver to store this instead of _dependencyList.
+  DependencyGraph graph = resolveDependencies(DependencyGraph(), _dependencyList._dependencies, std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier>());
+  return ArbiterResolvedDependencyList(graph.allNodes());
+}
+
+DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &baseGraph, const std::vector<ArbiterDependency> &dependencyList, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false)
+{
   std::map<ArbiterProjectIdentifier, std::unique_ptr<ArbiterRequirement>> requirementsByProject;
 
-  for (const ArbiterDependency &dependency : _dependencyList._dependencies) {
+  for (const ArbiterDependency &dependency : dependencyList) {
     requirementsByProject[dependency._projectIdentifier] = dependency.requirement().clone();
   }
 
@@ -195,7 +200,7 @@ ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 
     std::vector<ArbiterSelectedVersion> versions = availableVersionsSatisfying(project, requirement);
     if (versions.empty()) {
-      throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(requirement) + " from available versions");
+      throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(requirement) + " from available versions of " + toString(project));
     }
 
     // Sort the version list with highest precedence first, so we try the newest
@@ -220,32 +225,44 @@ ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
     ranges.emplace_back(dependencies.cbegin(), dependencies.cend());
   }
 
-  PermutationIterator<Iterator> permuter(std::move(ranges));
   std::exception_ptr lastException = std::make_exception_ptr(Exception::UnsatisfiableConstraints("No further combinations to attempt"));
 
-  while (permuter) {
-    DependencyGraph candidate;
+  for (PermutationIterator<Iterator> permuter(std::move(ranges)); permuter; ++permuter) {
+    try {
+      std::vector<ArbiterResolvedDependency> choices = *permuter;
 
-    std::vector<ArbiterResolvedDependency> choices = *permuter;
+      DependencyGraph candidate = baseGraph;
 
-    std::unordered_map<ArbiterResolvedDependency, ArbiterDependencyList> transitives;
-    transitives.reserve(choices.size());
-
-    for (ArbiterResolvedDependency &dependency : choices) {
-      const ArbiterRequirement &requirement = *requirementsByProject.at(dependency._project);
-
-      try {
-        candidate.addNode(dependency, requirement, None());
-      } catch (std::exception &ex) {
-        // This shouldn't happen, because there aren't yet other requirements in
-        // the graph with which this node could conflict.
-        throw std::logic_error(std::string("Exception thrown while adding dependency graph root: ") + ex.what());
+      // Add everything to the graph first, to throw any exceptions that would
+      // occur before we perform the computation- and memory-expensive stuff for
+      // transitive dependencies.
+      for (ArbiterResolvedDependency &dependency : choices) {
+        const ArbiterRequirement &requirement = *requirementsByProject.at(dependency._project);
+        candidate.addNode(dependency, requirement, maybeAt(dependentsByProject, dependency._project));
       }
 
-      transitives[dependency] = fetchDependencies(dependency._project, dependency._version);
+      // Collect immediate children for the next phase of dependency resolution,
+      // so we can permute their versions as a group (for something
+      // approximating breadth-first search).
+      std::vector<ArbiterDependency> collectedTransitives;
+      std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> dependentsByTransitive;
+
+      for (ArbiterResolvedDependency &dependency : choices) {
+        std::vector<ArbiterDependency> transitives = fetchDependencies(dependency._project, dependency._version)._dependencies;
+
+        for (const ArbiterDependency &transitive : transitives) {
+          dependentsByTransitive[transitive._projectIdentifier] = dependency._project;
+        }
+
+        collectedTransitives.insert(collectedTransitives.end(), transitives.begin(), transitives.end());
+      }
+
+      // TODO: Free local collections before recursing?
+
+      return resolveDependencies(candidate, std::move(collectedTransitives), std::move(dependentsByTransitive));
+    } catch (Arbiter::Exception::Base &ex) {
+      lastException = std::current_exception();
     }
-    
-    assert(false);
   }
 
   rethrow_exception(lastException);

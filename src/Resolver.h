@@ -65,7 +65,7 @@ class DependencyGraph final
         void setRequirement (std::unique_ptr<ArbiterRequirement> requirement);
 
       private:
-        std::unique_ptr<ArbiterRequirement> _requirement;
+        std::shared_ptr<ArbiterRequirement> _requirement;
     };
 
     static ArbiterResolvedDependency resolveNode (const NodeKey &key, const NodeValue &value);
@@ -125,4 +125,6 @@ struct ArbiterResolver final
   private:
     const ArbiterResolverBehaviors _behaviors;
     const ArbiterDependencyList _dependencyList;
+
+    Arbiter::Resolver::DependencyGraph resolveDependencies (const Arbiter::Resolver::DependencyGraph &baseGraph, const std::vector<ArbiterDependency> &dependencyList, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false);
 };

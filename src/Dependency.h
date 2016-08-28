@@ -23,6 +23,9 @@ struct ArbiterProjectIdentifier final
 
     Value _value;
 
+    ArbiterProjectIdentifier ()
+    {}
+
     explicit ArbiterProjectIdentifier (Value value)
       : _value(std::move(value))
     {}

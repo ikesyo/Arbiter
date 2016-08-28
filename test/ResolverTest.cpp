@@ -82,6 +82,40 @@ class EmptyTestValue final : public TestValue
     }
 };
 
+struct StringTestValue final : public TestValue
+{
+  public:
+    explicit StringTestValue (std::string str)
+      : _str(std::move(str))
+    {}
+
+    bool operator== (const TestValue &other) const override
+    {
+      if (auto ptr = dynamic_cast<const StringTestValue *>(&other)) {
+        return _str == ptr->_str;
+      } else {
+        return true;
+      }
+    }
+
+    bool operator< (const TestValue &other) const override
+    {
+      if (auto ptr = dynamic_cast<const StringTestValue *>(&other)) {
+        return _str < ptr->_str;
+      } else {
+        return true;
+      }
+    }
+
+    std::ostream &describe (std::ostream &os) const override
+    {
+      return os << _str;
+    }
+
+  private:
+    std::string _str;
+};
+
 template<typename Owner, typename Value, typename... Args>
 SharedUserValue<Owner> makeSharedUserValue (Args &&...args)
 {
@@ -114,6 +148,11 @@ ArbiterProjectIdentifier emptyProjectIdentifier ()
   return ArbiterProjectIdentifier(makeSharedUserValue<ArbiterProjectIdentifier, EmptyTestValue>());
 }
 
+ArbiterProjectIdentifier makeProjectIdentifier (std::string name)
+{
+  return ArbiterProjectIdentifier(makeSharedUserValue<ArbiterProjectIdentifier, StringTestValue>(std::move(name)));
+}
+
 } // namespace
 
 TEST(ResolverTest, ResolvesEmptyDependencies) {
@@ -138,15 +177,35 @@ TEST(ResolverTest, ResolvesOneDependency) {
   ArbiterResolver resolver(behaviors, ArbiterDependencyList(std::move(dependencies)), makeSharedUserValue<ArbiterResolver, EmptyTestValue>());
 
   ArbiterResolvedDependencyList resolved = resolver.resolve();
-  EXPECT_FALSE(resolved._dependencies.empty());
+  ASSERT_EQ(resolved._dependencies.size(), 1);
   EXPECT_EQ(resolved._dependencies[0]._project, emptyProjectIdentifier());
   EXPECT_EQ(resolved._dependencies[0]._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
 }
 
-#if 0
 TEST(ResolverTest, ResolvesMultipleDependencies)
-{}
+{
+  ArbiterResolverBehaviors behaviors;
+  behaviors.createDependencyList = &createEmptyDependencyList;
+  behaviors.createAvailableVersionsList = &createMajorVersionsList;
 
+  std::vector<ArbiterDependency> dependencies;
+  dependencies.emplace_back(makeProjectIdentifier("B"), Requirement::CompatibleWith(ArbiterSemanticVersion(2, 0, 0), ArbiterRequirementStrictnessStrict));
+  dependencies.emplace_back(makeProjectIdentifier("A"), Requirement::AtLeast(ArbiterSemanticVersion(2, 0, 1)));
+  dependencies.emplace_back(makeProjectIdentifier("C"), Requirement::Exactly(ArbiterSemanticVersion(1, 0, 0)));
+
+  ArbiterResolver resolver(behaviors, ArbiterDependencyList(std::move(dependencies)), makeSharedUserValue<ArbiterResolver, EmptyTestValue>());
+
+  ArbiterResolvedDependencyList resolved = resolver.resolve();
+  ASSERT_EQ(resolved._dependencies.size(), 3);
+  EXPECT_EQ(resolved._dependencies[0]._project, makeProjectIdentifier("A"));
+  EXPECT_EQ(resolved._dependencies[0]._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
+  EXPECT_EQ(resolved._dependencies[1]._project, makeProjectIdentifier("B"));
+  EXPECT_EQ(resolved._dependencies[1]._version._semanticVersion, ArbiterSemanticVersion(2, 0, 0));
+  EXPECT_EQ(resolved._dependencies[2]._project, makeProjectIdentifier("C"));
+  EXPECT_EQ(resolved._dependencies[2]._version._semanticVersion, ArbiterSemanticVersion(1, 0, 0));
+}
+
+#if 0
 TEST(ResolverTest, ResolvesTransitiveDependencies)
 {}
 

@@ -162,134 +162,75 @@ ArbiterSelectedVersionList ArbiterResolver::fetchAvailableVersions (const Arbite
 
 ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 {
-  std::map<ArbiterDependency, std::vector<ArbiterSelectedVersion>> versionsByDependency;
-  versionsByDependency.reserve(_dependencyList._dependencies.size());
+  // TODO: Refactor ArbiterResolver to store this instead of _dependencyList.
+  std::map<ArbiterProjectIdentifier, std::unique_ptr<ArbiterRequirement>> requirementsByProject;
 
   for (const ArbiterDependency &dependency : _dependencyList._dependencies) {
-    auto versions = availableVersionsSatisfying(dependency._projectIdentifier, dependency.requirement());
+    requirementsByProject[dependency._projectIdentifier] = dependency.requirement().clone();
+  }
+
+  std::map<ArbiterProjectIdentifier, std::vector<ArbiterResolvedDependency>> possibilities;
+
+  for (const auto &pair : requirementsByProject) {
+    const ArbiterProjectIdentifier &project = pair.first;
+    const ArbiterRequirement &requirement = *pair.second;
+
+    std::vector<ArbiterSelectedVersion> versions = availableVersionsSatisfying(project, requirement);
+    if (versions.empty()) {
+      throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(requirement) + " from available versions");
+    }
 
     // Sort the version list with highest precedence first, so we try the newest
     // possible versions first.
     std::sort(versions.begin(), versions.end(), std::greater<ArbiterSelectedVersion>());
 
-    versionsByDependency[dependency] = std::move(versions);
-  }
+    std::vector<ArbiterResolvedDependency> resolutions;
+    resolutions.reserve(versions.size());
 
-  for (const auto &pair : versionsByDependency) {
-    const ArbiterDependency &dependency = pair.first;
-    const std::vector<ArbiterSelectedVersion> &versions = pair.second;
-  }
-
-  /*
-  DependencyGraph candidate;
-
-  // Populate the initial roots of the graph.
-  for (const auto &pair : versionsByDependency) {
-    const ArbiterDependency &dependency = pair.first;
-    const std::vector<ArbiterSelectedVersion> &versions = pair.second;
-
-    if (versions.empty()) {
-      throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(dependency.requirement()) + " from available versions");
+    for (ArbiterSelectedVersion &version : versions) {
+      resolutions.emplace_back(project, std::move(version));
     }
 
-    try {
-      candidate.addNode(DependencyGraph::Node(dependency._projectIdentifier, versions.front()), dependency.requirement(), None());
-    } catch (std::exception &ex) {
-      // This shouldn't happen, because there aren't yet other requirements in
-      // the graph with which this node could conflict.
-      throw std::logic_error("Exception thrown while adding dependency graph root: " + ex.what());
-    }
-  }
-  */
-
-  // TODO
-  assert(false);
-}
-
-DependencyGraph ArbiterResolver::attemptRoots (const std::unordered_map<ArbiterDependency, std::vector<ArbiterSelectedVersion>> &versionsByDependency, size_t attempt = 0) noexcept(false)
-{
-  // TODO: This should use an ordered map or a different structure, so that
-  // dependency resolution is deterministic.
-  std::unordered_map<ArbiterDependency, std::vector<ArbiterSelectedVersion>::const_iterator> selectedVersionByDependency;
-  selectedVersionByDependency.reserve(versionsByDependency.size());
-
-  // Extract iterators for each version list.
-  for (const auto &pair : versionsByDependency) {
-    const ArbiterDependency &dependency = pair.first;
-    const std::vector<ArbiterSelectedVersion> &versions = pair.second;
-
-    if (versions.empty()) {
-      throw Exception::UnsatisfiableConstraints("Cannot satisfy " + toString(dependency.requirement()) + " from available versions");
-    }
-
-    selectedVersionByDependency[dependency] = versions.begin();
+    possibilities[project] = std::move(resolutions);
   }
 
-  // Perform a breadth-first search over the list of versions, by advancing each
-  // one incrementally until we get to a combination we haven't tried before.
-  size_t remainingOffset = attempt;
-  while (remainingOffset > 0) {
-    bool movedOne = false;
+  using Iterator = std::vector<ArbiterResolvedDependency>::const_iterator;
 
-    for (auto &pair : selectedVersionByDependency) {
-      const ArbiterDependency &dependency = pair.first;
-      const std::vector<ArbiterSelectedVersion> &versions = versionsByDependency[dependency];
+  std::vector<IteratorRange<Iterator>> ranges;
+  for (const auto &pair : possibilities) {
+    const std::vector<ArbiterResolvedDependency> &dependencies = pair.second;
+    ranges.emplace_back(dependencies.cbegin(), dependencies.cend());
+  }
 
-      auto &iter = pair.second;
-      if (iter == versions.end()) {
-        continue;
+  PermutationIterator<Iterator> permuter(std::move(ranges));
+  std::exception_ptr lastException = std::make_exception_ptr(Exception::UnsatisfiableConstraints("No further combinations to attempt"));
+
+  while (permuter) {
+    DependencyGraph candidate;
+
+    std::vector<ArbiterResolvedDependency> choices = *permuter;
+
+    std::unordered_map<ArbiterResolvedDependency, ArbiterDependencyList> transitives;
+    transitives.reserve(choices.size());
+
+    for (ArbiterResolvedDependency &dependency : choices) {
+      const ArbiterRequirement &requirement = *requirementsByProject.at(dependency._project);
+
+      try {
+        candidate.addNode(dependency, requirement, None());
+      } catch (std::exception &ex) {
+        // This shouldn't happen, because there aren't yet other requirements in
+        // the graph with which this node could conflict.
+        throw std::logic_error(std::string("Exception thrown while adding dependency graph root: ") + ex.what());
       }
 
-      ++iter;
-      movedOne = true;
-
-      if (--remainingOffset == 0) {
-        break;
-      }
+      transitives[dependency] = fetchDependencies(dependency._project, dependency._version);
     }
-
-    if (!movedOne) {
-      throw Exception::UnsatisfiableConstraints("No further combinations to attempt");
-    }
+    
+    assert(false);
   }
 
-  // Create a "base" dependency graph that we will use to attempt transitive
-  // dependencies upon.
-  DependencyGraph baseGraph;
-
-  // Collect immediate children for each version we selected.
-  std::unordered_map<ArbiterResolvedDependency, ArbiterDependencyList> childDependencies;
-
-  for (const auto &pair : selectedVersionByDependency) {
-    const ArbiterDependency &dependency = pair.first;
-    const ArbiterSelectedVersion &version = *pair.second;
-
-    ArbiterResolvedDependency node(dependency._projectIdentifier, version);
-
-    try {
-      baseGraph.addNode(node, dependency.requirement(), None());
-    } catch (std::exception &ex) {
-      // This shouldn't happen, because there aren't yet other requirements in
-      // the graph with which this node could conflict.
-      throw std::logic_error("Exception thrown while adding dependency graph root: " + ex.what());
-    }
-
-    childDependencies[std::move(node)] = fetchDependencies(dependency._projectIdentifier, version);
-  }
-
-  // TODO: Clear data structures that are now unused, to save memory?
-
-  try {
-    // attempt dependencies
-  } catch (Arbiter::Exception::Base &ex) {
-    try {
-      // Make another attempt with a new graph.
-      return attemptRoots(versionsByDependency, attempt + 1);
-    } catch (Arbiter::Exception::Base &) {
-      // If that also fails, return the original root cause.
-      throw ex;
-    }
-  }
+  rethrow_exception(lastException);
 }
 
 std::vector<ArbiterSelectedVersion> ArbiterResolver::availableVersionsSatisfying (const ArbiterProjectIdentifier &project, const ArbiterRequirement &requirement) const noexcept(false)

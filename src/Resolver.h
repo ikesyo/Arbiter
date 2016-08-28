@@ -87,6 +87,8 @@ class DependencyGraph final
      * The associated requirement may change as the graph is added to, and
      * therefore the requirements become more stringent.
      */
+    // FIXME: This should be a map of projects to requirements, not nodes.
+    // Otherwise, we're not really guaranteeing uniqueness.
     std::unordered_map<Node, std::shared_ptr<ArbiterRequirement>> _requirementsByNode;
 };
 

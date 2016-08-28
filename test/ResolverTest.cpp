@@ -6,6 +6,9 @@
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
+#include <stdexcept>
+
 using namespace Arbiter;
 using namespace Resolver;
 
@@ -153,6 +156,57 @@ ArbiterProjectIdentifier makeProjectIdentifier (std::string name)
   return ArbiterProjectIdentifier(makeSharedUserValue<ArbiterProjectIdentifier, StringTestValue>(std::move(name)));
 }
 
+ArbiterSelectedVersionList *createVariedVersionsList (const ArbiterResolver *resolver, const ArbiterProjectIdentifier *project, char **error)
+{
+  if (*project == makeProjectIdentifier("leaf_majors_only")) {
+    return createMajorVersionsList(resolver, project, error);
+  }
+
+  std::vector<ArbiterSelectedVersion> versions;
+  
+  versions.emplace_back(ArbiterSemanticVersion(0, 2, 3), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(1, 0, 1, makeOptional("alpha")), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(1, 0, 1), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(1, 3, 0), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+  versions.emplace_back(ArbiterSemanticVersion(2, 1, 0, None(), makeOptional("dailybuild")), makeSharedUserValue<ArbiterSelectedVersion, EmptyTestValue>());
+
+  return new ArbiterSelectedVersionList(std::move(versions));
+}
+
+ArbiterDependencyList *createTransitiveDependencyList (const ArbiterResolver *, const ArbiterProjectIdentifier *project, const ArbiterSelectedVersion *, char **)
+{
+  std::vector<ArbiterDependency> dependencies;
+
+  if (*project == makeProjectIdentifier("ancestor")) {
+    dependencies.emplace_back(makeProjectIdentifier("middle"), Requirement::CompatibleWith(ArbiterSemanticVersion(1, 0, 1), ArbiterRequirementStrictnessStrict));
+    dependencies.emplace_back(makeProjectIdentifier("leaf_majors_only"), Requirement::AtLeast(ArbiterSemanticVersion(1, 0, 0)));
+    dependencies.emplace_back(makeProjectIdentifier("leaf_dailybuild"), Requirement::AtLeast(ArbiterSemanticVersion(2, 0, 0)));
+  } else if (*project == makeProjectIdentifier("middle")) {
+    dependencies.emplace_back(makeProjectIdentifier("leaf_majors_only"), Requirement::Exactly(ArbiterSemanticVersion(2, 0, 0)));
+    dependencies.emplace_back(makeProjectIdentifier("leaf"), Requirement::CompatibleWith(ArbiterSemanticVersion(0, 2, 0), ArbiterRequirementStrictnessAllowVersionZeroPatches));
+  } else if (*project == makeProjectIdentifier("parent")) {
+    dependencies.emplace_back(makeProjectIdentifier("leaf"), Requirement::Exactly(ArbiterSemanticVersion(0, 2, 3)));
+    dependencies.emplace_back(makeProjectIdentifier("leaf_dailybuild"), Requirement::CompatibleWith(ArbiterSemanticVersion(2, 1, 0), ArbiterRequirementStrictnessStrict));
+  }
+
+  return new ArbiterDependencyList(std::move(dependencies));
+}
+
+const ArbiterResolvedDependency &findResolved (const ArbiterResolvedDependencyList &list, const std::string &name)
+{
+  ArbiterProjectIdentifier identifier = makeProjectIdentifier(name);
+
+  auto it = std::find_if(list._dependencies.begin(), list._dependencies.end(), [&identifier](const ArbiterResolvedDependency &dependency) {
+    return dependency._project == identifier;
+  });
+
+  if (it == list._dependencies.end()) {
+    throw std::out_of_range("Dependency " + name + " not found in resolved list");
+  }
+
+  return *it;
+}
+
 } // namespace
 
 TEST(ResolverTest, ResolvesEmptyDependencies) {
@@ -197,18 +251,34 @@ TEST(ResolverTest, ResolvesMultipleDependencies)
 
   ArbiterResolvedDependencyList resolved = resolver.resolve();
   ASSERT_EQ(resolved._dependencies.size(), 3);
-  EXPECT_EQ(resolved._dependencies[0]._project, makeProjectIdentifier("A"));
-  EXPECT_EQ(resolved._dependencies[0]._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
-  EXPECT_EQ(resolved._dependencies[1]._project, makeProjectIdentifier("B"));
-  EXPECT_EQ(resolved._dependencies[1]._version._semanticVersion, ArbiterSemanticVersion(2, 0, 0));
-  EXPECT_EQ(resolved._dependencies[2]._project, makeProjectIdentifier("C"));
-  EXPECT_EQ(resolved._dependencies[2]._version._semanticVersion, ArbiterSemanticVersion(1, 0, 0));
+  EXPECT_EQ(findResolved(resolved, "A")._version._semanticVersion, ArbiterSemanticVersion(3, 0, 0));
+  EXPECT_EQ(findResolved(resolved, "B")._version._semanticVersion, ArbiterSemanticVersion(2, 0, 0));
+  EXPECT_EQ(findResolved(resolved, "C")._version._semanticVersion, ArbiterSemanticVersion(1, 0, 0));
+}
+
+TEST(ResolverTest, ResolvesTransitiveDependencies)
+{
+  ArbiterResolverBehaviors behaviors;
+  behaviors.createDependencyList = &createTransitiveDependencyList;
+  behaviors.createAvailableVersionsList = &createVariedVersionsList;
+
+  std::vector<ArbiterDependency> dependencies;
+  dependencies.emplace_back(makeProjectIdentifier("ancestor"), Requirement::Exactly(ArbiterSemanticVersion(1, 0, 1, makeOptional("alpha"))));
+  dependencies.emplace_back(makeProjectIdentifier("parent"), Requirement::CompatibleWith(ArbiterSemanticVersion(1, 2, 3), ArbiterRequirementStrictnessStrict));
+
+  ArbiterResolver resolver(behaviors, ArbiterDependencyList(std::move(dependencies)), makeSharedUserValue<ArbiterResolver, EmptyTestValue>());
+
+  ArbiterResolvedDependencyList resolved = resolver.resolve();
+  ASSERT_EQ(resolved._dependencies.size(), 6);
+  EXPECT_EQ(findResolved(resolved, "ancestor")._version._semanticVersion, ArbiterSemanticVersion(1, 0, 1, makeOptional("alpha")));
+  EXPECT_EQ(findResolved(resolved, "middle")._version._semanticVersion, ArbiterSemanticVersion(1, 3, 0));
+  EXPECT_EQ(findResolved(resolved, "parent")._version._semanticVersion, ArbiterSemanticVersion(1, 3, 0));
+  EXPECT_EQ(findResolved(resolved, "leaf")._version._semanticVersion, ArbiterSemanticVersion(0, 2, 3));
+  EXPECT_EQ(findResolved(resolved, "leaf_majors_only")._version._semanticVersion, ArbiterSemanticVersion(2, 0, 0));
+  EXPECT_EQ(findResolved(resolved, "leaf_dailybuild")._version._semanticVersion, ArbiterSemanticVersion(2, 1, 0, None(), makeOptional("dailybuild")));
 }
 
 #if 0
-TEST(ResolverTest, ResolvesTransitiveDependencies)
-{}
-
 TEST(ResolverTest, FailsWhenNoAvailableVersions)
 {}
 

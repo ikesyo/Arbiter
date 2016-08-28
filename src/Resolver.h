@@ -126,5 +126,5 @@ struct ArbiterResolver final
     const ArbiterResolverBehaviors _behaviors;
     const ArbiterDependencyList _dependencyList;
 
-    Arbiter::Resolver::DependencyGraph resolveDependencies (const Arbiter::Resolver::DependencyGraph &baseGraph, const std::vector<ArbiterDependency> &dependencyList, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false);
+    Arbiter::Resolver::DependencyGraph resolveDependencies (const Arbiter::Resolver::DependencyGraph &baseGraph, const std::set<ArbiterDependency> &dependencySet, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false);
 };

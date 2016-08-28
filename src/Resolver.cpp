@@ -180,23 +180,26 @@ ArbiterSelectedVersionList ArbiterResolver::fetchAvailableVersions (const Arbite
 
 ArbiterResolvedDependencyList ArbiterResolver::resolve () noexcept(false)
 {
-  DependencyGraph graph = resolveDependencies(DependencyGraph(), _dependencyList._dependencies, std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier>());
+  // TODO: Replace _dependencyList with this.
+  std::set<ArbiterDependency> dependencySet(_dependencyList._dependencies.begin(), _dependencyList._dependencies.end());
+
+  DependencyGraph graph = resolveDependencies(DependencyGraph(), std::move(dependencySet), std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier>());
   return ArbiterResolvedDependencyList(graph.allNodes());
 }
 
-DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &baseGraph, const std::vector<ArbiterDependency> &dependencyList, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false)
+DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &baseGraph, const std::set<ArbiterDependency> &dependencySet, const std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> &dependentsByProject) noexcept(false)
 {
-  if (dependencyList.empty()) {
+  if (dependencySet.empty()) {
     return baseGraph;
   }
 
   std::map<ArbiterProjectIdentifier, std::unique_ptr<ArbiterRequirement>> requirementsByProject;
 
-  for (const ArbiterDependency &dependency : dependencyList) {
+  for (const ArbiterDependency &dependency : dependencySet) {
     requirementsByProject[dependency._projectIdentifier] = dependency.requirement().clone();
   }
 
-  assert(requirementsByProject.size() == dependencyList.size());
+  assert(requirementsByProject.size() == dependencySet.size());
 
   std::map<ArbiterProjectIdentifier, std::vector<ArbiterResolvedDependency>> possibilities;
 
@@ -254,7 +257,7 @@ DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &bas
       // Collect immediate children for the next phase of dependency resolution,
       // so we can permute their versions as a group (for something
       // approximating breadth-first search).
-      std::vector<ArbiterDependency> collectedTransitives;
+      std::set<ArbiterDependency> collectedTransitives;
       std::unordered_map<ArbiterProjectIdentifier, ArbiterProjectIdentifier> dependentsByTransitive;
 
       for (ArbiterResolvedDependency &dependency : choices) {
@@ -264,7 +267,7 @@ DependencyGraph ArbiterResolver::resolveDependencies (const DependencyGraph &bas
           dependentsByTransitive[transitive._projectIdentifier] = dependency._project;
         }
 
-        collectedTransitives.insert(collectedTransitives.end(), transitives.begin(), transitives.end());
+        collectedTransitives.insert(transitives.begin(), transitives.end());
       }
 
       // TODO: Free local collections before recursing?
